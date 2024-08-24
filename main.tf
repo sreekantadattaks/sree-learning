@@ -1,113 +1,91 @@
-# Copyright (c) HashiCorp, Inc.
-# SPDX-License-Identifier: MPL-2.0
-
 provider "aws" {
-  region = var.region
+  region = "eu-west-1" # Replace with your desired AWS region
 }
 
-# Filter out local zones, which are not currently supported 
-# with managed node groups
-data "aws_availability_zones" "available" {
-  filter {
-    name   = "opt-in-status"
-    values = ["opt-in-not-required"]
+resource "aws_vpc" "demo-vpc" {
+  cidr_block = "10.0.0.0/16"
+  tags = {
+    Name = "demo-vpc"
   }
 }
 
-locals {
-  cluster_name = "education-eks-${random_string.suffix.result}"
-}
-
-resource "random_string" "suffix" {
-  length  = 8
-  special = false
-}
-
-module "vpc" {
-  source  = "terraform-aws-modules/vpc/aws"
-  version = "5.8.1"
-
-  name = "education-vpc"
-
-  cidr = "10.0.0.0/16"
-  azs  = slice(data.aws_availability_zones.available.names, 0, 3)
-
-  private_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
-  public_subnets  = ["10.0.4.0/24", "10.0.5.0/24", "10.0.6.0/24"]
-
-  enable_nat_gateway   = true
-  single_nat_gateway   = true
-  enable_dns_hostnames = true
-
-  public_subnet_tags = {
-    "kubernetes.io/role/elb" = 1
-  }
-
-  private_subnet_tags = {
-    "kubernetes.io/role/internal-elb" = 1
+resource "aws_subnet" "private-subnet-1" {
+  vpc_id            = aws_vpc.demo-vpc.id
+  cidr_block        = "10.0.1.0/24"
+  availability_zone = "eu-west-1a"
+  tags = {
+    Name = "private-subnet-1"
   }
 }
 
-module "eks" {
-  source  = "terraform-aws-modules/eks/aws"
-  version = "20.8.5"
-
-  cluster_name    = local.cluster_name
-  cluster_version = "1.29"
-
-  cluster_endpoint_public_access           = true
-  enable_cluster_creator_admin_permissions = true
-
-  cluster_addons = {
-    aws-ebs-csi-driver = {
-      service_account_role_arn = module.irsa-ebs-csi.iam_role_arn
-    }
-  }
-
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnets
-
-  eks_managed_node_group_defaults = {
-    ami_type = "AL2_x86_64"
-
-  }
-
-  eks_managed_node_groups = {
-    one = {
-      name = "node-group-1"
-
-      instance_types = ["t3.small"]
-
-      min_size     = 1
-      max_size     = 3
-      desired_size = 2
-    }
-
-    two = {
-      name = "node-group-2"
-
-      instance_types = ["t3.small"]
-
-      min_size     = 1
-      max_size     = 2
-      desired_size = 1
-    }
+resource "aws_subnet" "private-subnet-2" {
+  vpc_id            = aws_vpc.demo-vpc.id
+  cidr_block        = "10.0.2.0/24"
+  availability_zone = "eu-west-1b"
+  tags = {
+    Name = "private-subnet-2"
   }
 }
 
-
-# https://aws.amazon.com/blogs/containers/amazon-ebs-csi-driver-is-now-generally-available-in-amazon-eks-add-ons/ 
-data "aws_iam_policy" "ebs_csi_policy" {
-  arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+resource "aws_subnet" "public-subnet-1" {
+  vpc_id            = aws_vpc.demo-vpc.id
+  cidr_block        = "10.0.3.0/24"
+  availability_zone = "eu-west-1a"
+  tags = {
+    Name = "public-subnet-1"
+  }
 }
 
-module "irsa-ebs-csi" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"
-  version = "5.39.0"
+resource "aws_subnet" "public-subnet-2" {
+  vpc_id            = aws_vpc.demo-vpc.id
+  cidr_block        = "10.0.4.0/24"
+  availability_zone = "eu-west-1b"
+  tags = {
+    Name = "public-subnet-2"
+  }
+}
 
-  create_role                   = true
-  role_name                     = "AmazonEKSTFEBSCSIRole-${module.eks.cluster_name}"
-  provider_url                  = module.eks.oidc_provider
-  role_policy_arns              = [data.aws_iam_policy.ebs_csi_policy.arn]
-  oidc_fully_qualified_subjects = ["system:serviceaccount:kube-system:ebs-csi-controller-sa"]
+resource "aws_internet_gateway" "demo-igw" {
+  vpc_id = aws_vpc.demo-vpc.id
+  tags = {
+    Name = "demo-vpc-IGW"
+  }
+}
+
+resource "aws_route_table" "public-route-table" {
+  vpc_id = aws_vpc.demo-vpc.id
+  tags = {
+    Name = "public-route-table"
+  }
+}
+
+resource "aws_route" "public-route" {
+  route_table_id         = aws_route_table.public-route-table.id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.demo-igw.id
+}
+
+resource "aws_route_table_association" "public-subnet-1-association" {
+  subnet_id      = aws_subnet.public-subnet-1.id
+  route_table_id = aws_route_table.public-route-table.id
+}
+
+resource "aws_route_table_association" "public-subnet-2-association" {
+  subnet_id      = aws_subnet.public-subnet-2.id
+  route_table_id = aws_route_table.public-route-table.id
+}
+
+resource "aws_eip" "nat-eip" {
+  domain = "vpc"
+  tags = {
+    Name = "nat-eip"
+  }
+}
+
+resource "aws_nat_gateway" "nat-gateway" {
+  allocation_id = aws_eip.nat-eip.id
+  subnet_id     = aws_subnet.public-subnet-1.id
+  tags = {
+    Name = "nat-gateway"
+  }
 }
