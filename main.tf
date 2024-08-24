@@ -1,5 +1,8 @@
 provider "aws" {
   region = "eu-west-1" # Replace with your desired AWS region
+  aws_access_key_id = ${{secrets.aws_access_key_id}}
+  aws_secret_access_key = ${{secrets.aws_secret_access_key}}
+
 }
 
 resource "aws_vpc" "demo-vpc" {
