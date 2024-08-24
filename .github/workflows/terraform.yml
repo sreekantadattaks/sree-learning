@@ -1,0 +1,24 @@
+name: Deploy AWS VPC Module with Terraform
+
+on:
+  push:
+    branches:   
+      - main
+
+jobs:
+  Terraform:
+    name: 'Terraform'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./sree-learning
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4      
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v1
+      with:
+        cli_config_credentials_token: ${{ secrets.tfc_team_token }}
